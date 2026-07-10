@@ -1,0 +1,39 @@
+name: Aggiornamento dati guerra (giornaliero)
+
+on:
+  schedule:
+    # Ogni giorno alle 08:30 UTC — il report dello Stato Maggiore ucraino
+    # esce al mattino (ora di Kyiv) e il dataset viene aggiornato poco dopo.
+    - cron: "30 8 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installa dipendenze
+        run: pip install requests pandas
+
+      - name: Scarica dati guerra
+        run: python fetch_war.py
+
+      - name: Commit dei nuovi dati
+        run: |
+          git config user.name "cbr-tracker-bot"
+          git config user.email "actions@github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Nessun dato nuovo oggi."
+          else
+            git commit -m "Dati guerra $(date -u +%Y-%m-%d)"
+            git push
+          fi
