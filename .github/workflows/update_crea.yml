@@ -1,0 +1,31 @@
+name: Aggiornamento dati CREA
+
+on:
+  schedule:
+    - cron: "30 9 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Scarica dati CREA
+        run: python fetch_crea.py
+      - name: Commit dei nuovi dati
+        run: |
+          git config user.name "crea-tracker-bot"
+          git config user.email "actions@github.com"
+          git add data/crea_*.csv
+          if git diff --cached --quiet; then
+            echo "Nessun dato CREA nuovo."
+          else
+            git commit -m "Dati CREA $(date -u +%Y-%m-%d)"
+            git push
+          fi

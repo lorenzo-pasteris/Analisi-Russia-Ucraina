@@ -16,7 +16,7 @@ import streamlit as st
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 st.set_page_config(page_title="Russia Tracker", page_icon="📊", layout="wide")
-st.title("📊 Russia Tracker — economia e guerra")
+st.title("📊 Russia Tracker — economia, energia e guerra")
 st.caption(
     "Riserve e dati CBR: aggiornamento settimanale (giovedì) · "
     "Perdite/attacchi: aggiornamento giornaliero · tutto automatico via GitHub Actions"
@@ -59,6 +59,8 @@ monthly = load("reserves_monthly.csv")
 key_rate = load("key_rate.csv")
 fx = load("fx_rates.csv")
 war = load("war_losses.csv")
+crea_monthly = load("crea_monthly.csv")
+crea_counter = pd.read_csv(os.path.join(DATA_DIR, "crea_counter.csv"))
 
 # ================== ANALISI INTRODUTTIVA ==================
 with st.expander("‼️ Come leggere questi dati — metodologia e avvertenze", expanded=False):
@@ -78,6 +80,9 @@ non come fotografie esatte.
   gli osservatori indipendenti (es. Oryx, che conta solo perdite documentate
   fotograficamente) stimano valori più bassi per i mezzi. Vanno lette come
   limite superiore e, soprattutto, come indicatore di intensità nel tempo.
+- *Energia:* stime del [Russia Fossil Tracker di CREA](https://www.russiafossiltracker.com/),
+  basate su flussi commerciali e modelli di prezzo. I valori mensili rappresentano
+  la **media giornaliera stimata** del mese e possono essere rivisti retroattivamente.
 
 **Le riserve\\* non sono tutte spendibili.** Il totale pubblicato dalla CBR
 include ~300 mld $ di asset **congelati** dalle sanzioni occidentali dal
@@ -91,7 +96,9 @@ sopra il 15-20% segnalano un'economia in surriscaldamento da economia di guerra.
 """)
 
 st.divider()
-war_tab, economy_tab, data_tab = st.tabs(["⚔️ Guerra", "🏦 Economia", "📋 Dati e fonti"])
+war_tab, economy_tab, crea_tab, data_tab = st.tabs(
+    ["⚔️ Guerra", "🏦 Economia", "⛽ Energia CREA", "📋 Dati e fonti"]
+)
 
 with war_tab:
     st.header("Perdite russe dichiarate da Kyiv")
@@ -219,20 +226,93 @@ with economy_tab:
                            labels={"date": "", "rub_per_unit": "₽"}), width="stretch")
     data_tools(fx_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "cambi")
 
+with crea_tab:
+    st.header("Ricavi russi dalle esportazioni di combustibili fossili")
+    st.caption("Stime CREA · aggiornamento giornaliero · valori soggetti a revisioni metodologiche")
+    counter_total = crea_counter[crea_counter.destination_region == "Total"].iloc[-1]
+    counter_eu = crea_counter[crea_counter.destination_region == "EU"].iloc[-1]
+    counter_china = crea_counter[crea_counter.destination_region == "China"].iloc[-1]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Ricavi totali dal 24.02.2022", f"€{counter_total.total_eur / 1e9:,.0f} mld")
+    m2.metric("Acquisti UE", f"€{counter_eu.total_eur / 1e9:,.0f} mld")
+    m3.metric("Acquisti Cina", f"€{counter_china.total_eur / 1e9:,.0f} mld")
+    m4.metric("Ricavi stimati al giorno", f"€{counter_total.eur_per_day / 1e6:,.0f} mln")
+
+    st.subheader("Ricavi per combustibile — media giornaliera mensile")
+    total_monthly = crea_monthly[crea_monthly.destination_region == "Total"]
+    fuel_dates = st.date_input("Intervallo", (total_monthly.date.min().date(),
+                                               total_monthly.date.max().date()),
+                               min_value=total_monthly.date.min().date(),
+                               max_value=total_monthly.date.max().date(), key="crea-fuel-dates")
+    fuels = {"oil_eur_per_day": "Petrolio", "gas_eur_per_day": "Gas",
+             "coal_eur_per_day": "Carbone"}
+    selected_fuels = st.multiselect("Combustibili", fuels, default=list(fuels),
+                                    format_func=fuels.get, key="crea-fuels")
+    fuel_view = filter_dates(total_monthly, fuel_dates)
+    fuel_chart = fuel_view.melt("date", value_vars=selected_fuels,
+                                var_name="combustibile", value_name="eur_per_day")
+    fuel_chart["combustibile"] = fuel_chart.combustibile.map(fuels)
+    fuel_chart["mln_eur_giorno"] = fuel_chart.eur_per_day / 1e6
+    st.plotly_chart(px.area(fuel_chart, x="date", y="mln_eur_giorno", color="combustibile",
+                           labels={"date": "", "mln_eur_giorno": "mln EUR/giorno",
+                                   "combustibile": "Combustibile"}), width="stretch")
+    data_tools(fuel_view[["date"] + selected_fuels], "Russia Fossil Tracker — CREA",
+               "https://www.russiafossiltracker.com/", "crea-ricavi-combustibile")
+
+    st.subheader("Ricavi per destinazione — media giornaliera mensile")
+    regions_monthly = crea_monthly[crea_monthly.destination_region != "Total"]
+    region_dates = st.date_input("Intervallo", (regions_monthly.date.min().date(),
+                                                 regions_monthly.date.max().date()),
+                                 min_value=regions_monthly.date.min().date(),
+                                 max_value=regions_monthly.date.max().date(), key="crea-region-dates")
+    available_regions = sorted(regions_monthly.destination_region.unique())
+    selected_regions = st.multiselect("Destinazioni", available_regions,
+                                      default=["China", "EU", "India", "Türkiye"],
+                                      key="crea-regions")
+    region_view = filter_dates(regions_monthly, region_dates)
+    region_view = region_view[region_view.destination_region.isin(selected_regions)]
+    region_chart = region_view.assign(mln_eur_giorno=region_view.total_eur_per_day / 1e6)
+    st.plotly_chart(px.line(region_chart, x="date", y="mln_eur_giorno",
+                           color="destination_region",
+                           labels={"date": "", "mln_eur_giorno": "mln EUR/giorno",
+                                   "destination_region": "Destinazione"}), width="stretch")
+    data_tools(region_view, "Russia Fossil Tracker — CREA",
+               "https://www.russiafossiltracker.com/", "crea-ricavi-destinazione")
+
+    st.subheader("Ricavi cumulativi per destinazione")
+    current_regions = crea_counter[crea_counter.destination_region != "Total"].copy()
+    selected_current = st.multiselect("Destinazioni", sorted(current_regions.destination_region),
+                                      default=sorted(current_regions.destination_region),
+                                      key="crea-current-regions")
+    current_view = current_regions[current_regions.destination_region.isin(selected_current)].copy()
+    current_view["mld_eur"] = current_view.total_eur / 1e9
+    current_view = current_view.sort_values("mld_eur", ascending=False)
+    st.plotly_chart(px.bar(current_view, x="destination_region", y="mld_eur",
+                          labels={"destination_region": "", "mld_eur": "mld EUR"}),
+                    width="stretch")
+    data_tools(current_view.drop(columns="mld_eur"), "Russia Fossil Tracker — CREA",
+               "https://www.russiafossiltracker.com/", "crea-ricavi-cumulativi")
+
+    st.info("CREA combina dati Kpler, Eurostat, ENTSOG, UN Comtrade e modelli di prezzo. "
+            "Le serie sono stime, non contabilità ufficiale russa, e possono essere riviste.")
+
 with data_tab:
     st.header("Tutti i dati")
     st.markdown("- [Banca Centrale Russa](https://www.cbr.ru/development/DWS/)\n"
                 "- [Dataset dei report dello Stato Maggiore ucraino]"
-                "(https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset)")
+                "(https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset)\n"
+                "- [Russia Fossil Tracker — CREA](https://www.russiafossiltracker.com/)")
     all_data = io.BytesIO()
     with pd.ExcelWriter(all_data, engine="openpyxl") as writer:
         for name, df in {"Guerra": war, "Riserve settimanali": weekly,
                          "Riserve mensili": monthly, "Tasso chiave": key_rate,
-                         "Cambi": fx}.items():
+                         "Cambi": fx, "CREA mensile": crea_monthly,
+                         "CREA cumulativo": crea_counter}.items():
             df.to_excel(writer, sheet_name=name, index=False)
     st.download_button("⬇️ Scarica tutti i dati in Excel", all_data.getvalue(),
                        "russia-tracker-dati.xlsx", key="xlsx-all")
 
 st.divider()
 st.caption(f"Ultimo dato riserve: {weekly.iloc[-1].date.date()} · "
-           f"ultimo dato guerra: {war.iloc[-1].date.date()} · Progetto a scopo informativo.")
+           f"ultimo dato guerra: {war.iloc[-1].date.date()} · "
+           f"ultimo dato CREA: {crea_counter.updated_on.iloc[-1][:10]} · Progetto a scopo informativo.")
