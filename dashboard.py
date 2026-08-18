@@ -95,11 +95,7 @@ war_tab, economy_tab, data_tab = st.tabs(["⚔️ Guerra", "🏦 Economia", "�
 
 with war_tab:
     st.header("Perdite russe dichiarate da Kyiv")
-    war_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                              min_value=war.date.min().date(), max_value=war.date.max().date(),
-                              key="war-dates")
-    war_view = filter_dates(war, war_dates)
-    last_war = war_view.iloc[-1] if not war_view.empty else war.iloc[-1]
+    last_war = war.iloc[-1]
     w1, w2, w3, w4 = st.columns(4)
     for box, label, total, daily in [
         (w1, "Personale (cumulativo)", "personnel", "daily_personnel"),
@@ -113,59 +109,59 @@ with war_tab:
     war_ma = war.copy()
     for col in ["daily_personnel", "daily_drones", "daily_cruise_missiles"]:
         war_ma[f"{col}_ma7"] = war_ma[col].rolling(7).mean()
-    war_ma = filter_dates(war_ma, war_dates)
     st.subheader("Perdite giornaliere di personale (media mobile 7gg)")
-    st.plotly_chart(px.line(war_ma, x="date", y="daily_personnel_ma7",
+    personnel_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
+                                    min_value=war.date.min().date(), max_value=war.date.max().date(),
+                                    key="personnel-dates")
+    personnel_view = filter_dates(war_ma, personnel_dates)
+    st.plotly_chart(px.line(personnel_view, x="date", y="daily_personnel_ma7",
                            labels={"date": "", "daily_personnel_ma7": "uomini/giorno"}),
                     width="stretch")
-    data_tools(war_ma[["date", "personnel", "daily_personnel", "daily_personnel_ma7"]],
+    data_tools(personnel_view[["date", "personnel", "daily_personnel", "daily_personnel_ma7"]],
                "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "perdite-personale")
 
     st.subheader("Droni e missili da crociera (media mobile 7gg)")
+    missile_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
+                                  min_value=war.date.min().date(), max_value=war.date.max().date(),
+                                  key="missile-dates")
+    missile_view = filter_dates(war_ma, missile_dates)
     figw2 = go.Figure()
-    figw2.add_trace(go.Scatter(x=war_ma.date, y=war_ma.daily_drones_ma7, name="Droni"))
-    figw2.add_trace(go.Scatter(x=war_ma.date, y=war_ma.daily_cruise_missiles_ma7,
+    figw2.add_trace(go.Scatter(x=missile_view.date, y=missile_view.daily_drones_ma7, name="Droni"))
+    figw2.add_trace(go.Scatter(x=missile_view.date, y=missile_view.daily_cruise_missiles_ma7,
                                name="Missili da crociera"))
     figw2.update_layout(yaxis_title="unità/giorno", legend_orientation="h")
     st.plotly_chart(figw2, width="stretch")
-    data_tools(war_ma[["date", "drones", "cruise_missiles", "daily_drones",
+    data_tools(missile_view[["date", "drones", "cruise_missiles", "daily_drones",
                        "daily_cruise_missiles"]], "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "droni-missili")
 
     equipment = {"tanks": "Carri armati", "apc": "Blindati (APC)",
                  "artillery": "Artiglieria", "aircraft": "Aerei", "helicopters": "Elicotteri"}
+    st.subheader("Mezzi pesanti — perdite cumulative")
+    equipment_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
+                                    min_value=war.date.min().date(), max_value=war.date.max().date(),
+                                    key="equipment-dates")
+    equipment_view = filter_dates(war, equipment_dates)
     selected_equipment = st.multiselect("Mezzi da visualizzare", equipment,
                                         default=list(equipment), format_func=equipment.get)
-    st.subheader("Mezzi pesanti — perdite cumulative")
     figw3 = go.Figure()
     for col in selected_equipment:
-        figw3.add_trace(go.Scatter(x=war_view.date, y=war_view[col], name=equipment[col]))
+        figw3.add_trace(go.Scatter(x=equipment_view.date, y=equipment_view[col], name=equipment[col]))
     figw3.update_layout(yaxis_title="unità (cumulativo)", legend_orientation="h")
     st.plotly_chart(figw3, width="stretch")
-    data_tools(war_view[["date"] + selected_equipment], "dataset open-source dei report ucraini",
+    data_tools(equipment_view[["date"] + selected_equipment], "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "mezzi-pesanti")
 
 with economy_tab:
     st.header("Banca Centrale Russa")
-    economy_dates = st.date_input("Intervallo", (weekly.date.min().date(), weekly.date.max().date()),
-                                  min_value=weekly.date.min().date(), max_value=weekly.date.max().date(),
-                                  key="economy-dates")
-    weekly_view = filter_dates(weekly, economy_dates)
-    monthly_view = filter_dates(monthly, economy_dates)
-    key_view = filter_dates(key_rate, economy_dates)
-    fx_view = filter_dates(fx, economy_dates)
-    metric_weekly = weekly_view if len(weekly_view) >= 2 else weekly
-    metric_key = key_view if not key_view.empty else key_rate
-    metric_fx = fx_view[fx_view.currency == "USD"]
-    metric_monthly = monthly_view if not monthly_view.empty else monthly
-    last_w, prev_w = metric_weekly.iloc[-1], metric_weekly.iloc[-2]
-    last_kr = metric_key.iloc[-1]
-    last_usd = (metric_fx if not metric_fx.empty else fx[fx.currency == "USD"]).iloc[-1]
-    gold_share = metric_monthly.iloc[-1].gold_mln_usd / metric_monthly.iloc[-1].total_mln_usd * 100
+    last_w, prev_w = weekly.iloc[-1], weekly.iloc[-2]
+    last_kr = key_rate.iloc[-1]
+    last_usd = fx[fx.currency == "USD"].iloc[-1]
+    gold_share = monthly.iloc[-1].gold_mln_usd / monthly.iloc[-1].total_mln_usd * 100
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Riserve internazionali *", f"{last_w.reserves_bln_usd:,.1f} mld $",
               f"{last_w.reserves_bln_usd - prev_w.reserves_bln_usd:+.1f} vs precedente")
@@ -174,6 +170,10 @@ with economy_tab:
     c4.metric("Quota oro nelle riserve", f"{gold_share:.1f} %")
 
     st.subheader("Riserve internazionali* (settimanali, mld USD)")
+    reserve_dates = st.date_input("Intervallo", (weekly.date.min().date(), weekly.date.max().date()),
+                                  min_value=weekly.date.min().date(), max_value=weekly.date.max().date(),
+                                  key="reserve-dates")
+    weekly_view = filter_dates(weekly, reserve_dates)
     fig = px.line(weekly_view, x="date", y="reserves_bln_usd",
                   labels={"date": "", "reserves_bln_usd": "mld USD"})
     fig.add_vline(x="2022-02-24", line_dash="dash", line_color="red",
@@ -183,6 +183,10 @@ with economy_tab:
                "riserve-settimanali")
 
     st.subheader("Struttura delle riserve: valuta estera vs oro")
+    structure_dates = st.date_input("Intervallo", (monthly.date.min().date(), monthly.date.max().date()),
+                                    min_value=monthly.date.min().date(), max_value=monthly.date.max().date(),
+                                    key="structure-dates")
+    monthly_view = filter_dates(monthly, structure_dates)
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(x=monthly_view.date, y=monthly_view.fx_mln_usd,
                               stackgroup="one", name="Valuta estera (incl. congelata)"))
@@ -194,15 +198,23 @@ with economy_tab:
                "struttura-riserve")
 
     st.subheader("Tasso chiave (%)")
+    rate_dates = st.date_input("Intervallo", (key_rate.date.min().date(), key_rate.date.max().date()),
+                               min_value=key_rate.date.min().date(), max_value=key_rate.date.max().date(),
+                               key="rate-dates")
+    key_view = filter_dates(key_rate, rate_dates)
     fig3 = px.line(key_view, x="date", y="key_rate_pct", labels={"date": "", "key_rate_pct": "%"})
     fig3.update_traces(line_shape="hv")
     st.plotly_chart(fig3, width="stretch")
     data_tools(key_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "tasso-chiave")
 
-    currencies = st.multiselect("Valute da visualizzare", sorted(fx.currency.unique()),
-                                default=sorted(fx.currency.unique()))
-    fx_view = fx_view[fx_view.currency.isin(currencies)]
     st.subheader("Cambi ufficiali (₽ per unità)")
+    fx_dates = st.date_input("Intervallo", (fx.date.min().date(), fx.date.max().date()),
+                             min_value=fx.date.min().date(), max_value=fx.date.max().date(),
+                             key="fx-dates")
+    fx_view = filter_dates(fx, fx_dates)
+    currencies = st.multiselect("Valute da visualizzare", sorted(fx.currency.unique()),
+                                default=sorted(fx.currency.unique()), key="currencies")
+    fx_view = fx_view[fx_view.currency.isin(currencies)]
     st.plotly_chart(px.line(fx_view, x="date", y="rub_per_unit", color="currency",
                            labels={"date": "", "rub_per_unit": "₽"}), width="stretch")
     data_tools(fx_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "cambi")
