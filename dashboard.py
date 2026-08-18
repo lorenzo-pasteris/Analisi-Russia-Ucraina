@@ -35,7 +35,7 @@ fx = load("fx_rates.csv")
 war = load("war_losses.csv")
 
 # ================== ANALISI INTRODUTTIVA ==================
-with st.expander("📖 Come leggere questi dati — metodologia e avvertenze", expanded=True):
+with st.expander("‼️ Come leggere questi dati — metodologia e avvertenze", expanded=False):
     st.markdown("""
 **Cosa traccia questa dashboard.** Due facce dello stesso conflitto: la tenuta
 *economico-finanziaria* della Russia (riserve, tasso di interesse, rublo) e il
