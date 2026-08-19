@@ -78,12 +78,9 @@ def comparison_frame(df: pd.DataFrame, selection: dict, frequency: str):
         return df, "date", None
     compared = df.copy()
     compared["anno"] = compared.date.dt.year.astype(str)
-    if frequency == "settimanale":
-        compared["periodo"] = compared.date.dt.isocalendar().week.astype(int)
-    elif frequency == "mensile":
-        compared["periodo"] = compared.date.dt.month
-    else:
-        compared["periodo"] = compared.date.dt.dayofyear
+    compared["periodo"] = pd.to_datetime({
+        "year": 2000, "month": compared.date.dt.month, "day": compared.date.dt.day
+    })
     return compared, "periodo", "anno"
 
 
@@ -208,11 +205,11 @@ with war_tab:
     personnel_view, personnel_x, personnel_facet = comparison_frame(
         personnel_view, personnel_dates, "settimanale")
     if personnel_facet:
-        personnel_comparison = px.bar(
-            personnel_view, x=personnel_x, y="personnel", facet_col=personnel_facet,
-            labels={"periodo": "settimana dell'anno", "personnel": "persone/settimana",
+        personnel_comparison = px.line(
+            personnel_view, x=personnel_x, y="personnel", color=personnel_facet,
+            labels={"periodo": "mese", "personnel": "persone/settimana",
                     "anno": "Anno"})
-        personnel_comparison.update_layout(showlegend=False)
+        personnel_comparison.update_xaxes(tickformat="%b")
         st.plotly_chart(personnel_comparison, width="stretch")
     else:
         personnel_fig = go.Figure()
@@ -253,8 +250,8 @@ with war_tab:
             var_name="serie", value_name="unità")
         air_comparison["serie"] = air_comparison.serie.map(air_weapons)
         st.plotly_chart(px.line(
-            air_comparison, x=missile_x, y="unità", color="serie", facet_col=missile_facet,
-            labels={"periodo": "settimana dell'anno", "unità": "unità/settimana",
+            air_comparison, x=missile_x, y="unità", color=missile_facet, line_dash="serie",
+            labels={"periodo": "mese", "unità": "unità/settimana",
                     "serie": "", "anno": "Anno"}), width="stretch")
     else:
         air_fig = go.Figure()
@@ -285,11 +282,13 @@ with war_tab:
             ["date", "periodo", "anno"], value_vars=selected_equipment,
             var_name="mezzo", value_name="incremento_annuo")
         equipment_chart["mezzo"] = equipment_chart.mezzo.map(equipment)
-        st.plotly_chart(px.line(equipment_chart, x=equipment_x, y="incremento_annuo", color="mezzo",
-                                facet_col=equipment_facet,
-                                labels={"periodo": "giorno dell'anno", "mezzo": "",
+        equipment_comparison = px.line(
+            equipment_chart, x=equipment_x, y="incremento_annuo", color=equipment_facet,
+            line_dash="mezzo", labels={"periodo": "mese", "mezzo": "",
                                         "incremento_annuo": "incremento dall'inizio dell'anno",
-                                        "anno": "Anno"}), width="stretch")
+                                        "anno": "Anno"})
+        equipment_comparison.update_xaxes(tickformat="%b")
+        st.plotly_chart(equipment_comparison, width="stretch")
     else:
         figw3 = go.Figure()
         for col in selected_equipment:
@@ -309,10 +308,13 @@ with war_tab:
     aviation_ids = ["date"] + (["periodo", "anno"] if equipment_facet else [])
     aviation_chart = aviation.melt(aviation_ids, value_vars=["Aerei", "Elicotteri"],
                                     var_name="mezzo", value_name="unità")
-    st.plotly_chart(px.line(aviation_chart, x=equipment_x, y="unità", color="mezzo",
-                           facet_col=equipment_facet,
-                           labels={"date": "", "periodo": "giorno dell'anno",
-                                   "mezzo": "", "anno": "Anno"}), width="stretch")
+    aviation_figure = px.line(
+        aviation_chart, x=equipment_x, y="unità",
+        color=equipment_facet or "mezzo", line_dash="mezzo" if equipment_facet else None,
+        labels={"date": "", "periodo": "mese", "mezzo": "", "anno": "Anno"})
+    if equipment_facet:
+        aviation_figure.update_xaxes(tickformat="%b")
+    st.plotly_chart(aviation_figure, width="stretch")
     data_tools(aviation, "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "perdite-aviazione")
@@ -351,10 +353,10 @@ with economy_tab:
         weekly_view, reserve_dates, "settimanale")
     if reserve_facet:
         reserve_y = "reserves_bln_usd" if reserve_mode == "Livello" else "variazione_mld"
-        reserve_plot = px.line if reserve_mode == "Livello" else px.bar
-        fig = reserve_plot(weekly_view, x=reserve_x, y=reserve_y, facet_col=reserve_facet,
-                           labels={"periodo": "settimana dell'anno", reserve_y: reserve_mode,
+        fig = px.line(weekly_view, x=reserve_x, y=reserve_y, color=reserve_facet,
+                           labels={"periodo": "mese", reserve_y: reserve_mode,
                                    "anno": "Anno"})
+        fig.update_xaxes(tickformat="%b")
     elif reserve_mode == "Livello":
         fig = go.Figure()
         fig.add_scatter(x=weekly_view.date, y=weekly_view.reserves_bln_usd,
@@ -390,9 +392,10 @@ with economy_tab:
             var_name="componente", value_name="mln_usd")
         structure_chart["componente"] = structure_chart.componente.map(
             {"fx_mln_usd": "Valuta estera", "gold_mln_usd": "Oro monetario"})
-        fig2 = px.line(structure_chart, x=structure_x, y="mln_usd", color="componente",
-                       facet_col=structure_facet,
+        fig2 = px.line(structure_chart, x=structure_x, y="mln_usd", color=structure_facet,
+                       line_dash="componente",
                        labels={"periodo": "mese", "componente": "", "anno": "Anno"})
+        fig2.update_xaxes(tickformat="%b")
     else:
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=monthly_view.date, y=monthly_view.fx_mln_usd,
@@ -408,9 +411,11 @@ with economy_tab:
     rate_dates = date_range(key_rate.date.min().date(), key_rate.date.max().date(), "rate-dates")
     key_view = filter_dates(key_rate, rate_dates)
     key_view, rate_x, rate_facet = comparison_frame(key_view, rate_dates, "giornaliera")
-    fig3 = px.line(key_view, x=rate_x, y="key_rate_pct", facet_col=rate_facet,
-                   labels={"date": "", "periodo": "giorno dell'anno",
+    fig3 = px.line(key_view, x=rate_x, y="key_rate_pct", color=rate_facet,
+                   labels={"date": "", "periodo": "mese",
                            "key_rate_pct": "%", "anno": "Anno"})
+    if rate_facet:
+        fig3.update_xaxes(tickformat="%b")
     fig3.update_traces(line_shape="hv")
     st.plotly_chart(fig3, width="stretch")
     data_tools(key_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "tasso-chiave")
@@ -444,11 +449,15 @@ with economy_tab:
         "Volatilità mobile 20 giorni": ("volatilita_20", "deviazione standard, %"),
     }
     fx_column, fx_label = fx_columns[fx_mode]
-    st.plotly_chart(px.line(fx_view, x=fx_x, y=fx_column, color="currency",
-                            facet_col=fx_facet,
-                            labels={"date": "", fx_column: fx_label,
-                                    "periodo": "giorno dell'anno", "currency": "Valuta",
-                                    "anno": "Anno"}), width="stretch")
+    fx_figure = px.line(fx_view, x=fx_x, y=fx_column,
+                        color=fx_facet or "currency",
+                        line_dash="currency" if fx_facet else None,
+                        labels={"date": "", fx_column: fx_label,
+                                "periodo": "mese", "currency": "Valuta",
+                                "anno": "Anno"})
+    if fx_facet:
+        fx_figure.update_xaxes(tickformat="%b")
+    st.plotly_chart(fx_figure, width="stretch")
     data_tools(fx_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "cambi")
 
 with crea_tab:
@@ -496,11 +505,15 @@ with crea_tab:
         fuel_chart["valore"] /= 1e6
     fuel_label = "% rispetto allo stesso mese dell'anno precedente" if suffix == "_yoy" else "mln EUR/giorno"
     fuel_figure = px.area if fuel_mode == "Valore mensile" else px.line
-    st.plotly_chart(fuel_figure(
-        fuel_chart, x=fuel_x, y="valore", color="combustibile", facet_col=fuel_facet,
+    fuel_constructor = px.line if fuel_facet else fuel_figure
+    fuel_style = {"line_dash": "combustibile"} if fuel_facet else {}
+    fuel_plot = fuel_constructor(
+        fuel_chart, x=fuel_x, y="valore", color=fuel_facet or "combustibile",
         labels={"date": "", "periodo": "mese", "valore": fuel_label,
-                "combustibile": "Combustibile", "anno": "Anno"}),
-        width="stretch")
+                "combustibile": "Combustibile", "anno": "Anno"}, **fuel_style)
+    if fuel_facet:
+        fuel_plot.update_xaxes(tickformat="%b")
+    st.plotly_chart(fuel_plot, width="stretch")
     data_tools(fuel_view[["date"] + value_columns], "Russia Fossil Tracker — CREA",
                "https://www.russiafossiltracker.com/", "crea-ricavi-combustibile")
 
@@ -517,12 +530,16 @@ with crea_tab:
     region_chart = region_view.assign(mln_eur_giorno=region_view.total_eur_per_day / 1e6)
     region_chart, region_x, region_facet = comparison_frame(
         region_chart, region_dates, "mensile")
-    st.plotly_chart(px.line(region_chart, x=region_x, y="mln_eur_giorno",
-                           color="destination_region", facet_col=region_facet,
+    region_figure = px.line(region_chart, x=region_x, y="mln_eur_giorno",
+                           color=region_facet or "destination_region",
+                           line_dash="destination_region" if region_facet else None,
                            labels={"date": "", "periodo": "mese",
                                    "mln_eur_giorno": "mln EUR/giorno",
                                    "destination_region": "Destinazione",
-                                   "anno": "Anno"}), width="stretch")
+                                   "anno": "Anno"})
+    if region_facet:
+        region_figure.update_xaxes(tickformat="%b")
+    st.plotly_chart(region_figure, width="stretch")
     data_tools(region_view, "Russia Fossil Tracker — CREA",
                "https://www.russiafossiltracker.com/", "crea-ricavi-destinazione")
 
@@ -585,11 +602,17 @@ with maritime_tab:
     load_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), load_dates)
     load_view = load_view[load_view.port.isin(load_ports)]
     load_view, load_x, load_facet = comparison_frame(load_view, load_dates, "settimanale")
-    st.plotly_chart(px.bar(load_view, x=load_x, y="trade_count", color="port",
-                          facet_col=load_facet, barmode="group",
-                          labels={"date": "", "periodo": "settimana dell'anno",
-                                  "trade_count": "operazioni di carico", "port": "Terminale",
-                                  "anno": "Anno"}), width="stretch")
+    if load_facet:
+        load_figure = px.line(
+            load_view, x=load_x, y="trade_count", color=load_facet, line_dash="port",
+            labels={"periodo": "mese", "trade_count": "operazioni di carico",
+                    "port": "Terminale", "anno": "Anno"})
+        load_figure.update_xaxes(tickformat="%b")
+    else:
+        load_figure = px.bar(load_view, x=load_x, y="trade_count", color="port",
+                             labels={"date": "", "trade_count": "operazioni di carico",
+                                     "port": "Terminale"})
+    st.plotly_chart(load_figure, width="stretch")
     data_tools(load_view, "Russia Fossil Tracker — CREA",
                "https://api.russiafossiltracker.com/", "crea-carichi-porti")
 
@@ -623,10 +646,14 @@ with maritime_tab:
         {base_column: maritime_mode, "media_4_settimane": "Media mobile 4 settimane"}
     )
     maritime_label = "milioni di tonnellate" if maritime_mode == "Volume" else "tonnellate per operazione"
-    st.plotly_chart(px.line(
-        volume_chart, x=volume_x, y="valore", color="serie", facet_col=volume_facet,
-        labels={"date": "", "periodo": "settimana dell'anno", "valore": maritime_label,
-                "serie": "", "anno": "Anno"}), width="stretch")
+    volume_figure = px.line(
+        volume_chart, x=volume_x, y="valore", color=volume_facet or "serie",
+        line_dash="serie" if volume_facet else None,
+        labels={"date": "", "periodo": "mese", "valore": maritime_label,
+                "serie": "", "anno": "Anno"})
+    if volume_facet:
+        volume_figure.update_xaxes(tickformat="%b")
+    st.plotly_chart(volume_figure, width="stretch")
     data_tools(volume_view, "Russia Fossil Tracker — CREA",
                "https://api.russiafossiltracker.com/", "crea-volumi-marittimi")
 
@@ -639,11 +666,11 @@ with maritime_tab:
     heat_view = heat_view[heat_view.port.isin(heat_ports)]
     heat_view, heat_x, heat_facet = comparison_frame(heat_view, heat_dates, "settimanale")
     if heat_facet:
-        heatmap = px.density_heatmap(
-            heat_view, x=heat_x, y="port", z="trade_count", histfunc="sum",
-            facet_col=heat_facet, color_continuous_scale="Blues",
-            labels={"periodo": "settimana dell'anno", "port": "Terminale",
+        heatmap = px.line(
+            heat_view, x=heat_x, y="trade_count", color=heat_facet, line_dash="port",
+            labels={"periodo": "mese", "port": "Terminale",
                     "trade_count": "carichi", "anno": "Anno"})
+        heatmap.update_xaxes(tickformat="%b")
     else:
         heat_table = heat_view.pivot_table(index="port", columns="date", values="trade_count",
                                            aggfunc="sum", fill_value=0)
