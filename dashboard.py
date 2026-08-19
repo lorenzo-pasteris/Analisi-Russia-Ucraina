@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+TODAY = pd.Timestamp.today().date()
 
 st.set_page_config(page_title="Russia Tracker", page_icon="📊", layout="wide")
 st.title("📊 Russia Tracker — economia, energia e guerra")
@@ -146,7 +147,7 @@ with war_tab:
         war_ma[f"{col}_ma7"] = war_ma[col].rolling(7).mean()
     st.subheader("Perdite giornaliere di personale (media mobile 7gg)")
     personnel_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                                    min_value=war.date.min().date(), max_value=war.date.max().date(),
+                                    min_value=war.date.min().date(), max_value=TODAY,
                                     key="personnel-dates")
     personnel_view = filter_dates(war_ma, personnel_dates)
     st.plotly_chart(px.line(personnel_view, x="date", y="daily_personnel_ma7",
@@ -159,7 +160,7 @@ with war_tab:
 
     st.subheader("UAV e missili da crociera dichiarati persi/distrutti (media mobile 7gg)")
     missile_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                                  min_value=war.date.min().date(), max_value=war.date.max().date(),
+                                  min_value=war.date.min().date(), max_value=TODAY,
                                   key="missile-dates")
     missile_view = filter_dates(war_ma, missile_dates)
     air_weapons = {"daily_drones_ma7": "UAV", "daily_cruise_missiles_ma7": "Missili da crociera"}
@@ -181,7 +182,7 @@ with war_tab:
                  "artillery": "Artiglieria"}
     st.subheader("Mezzi terrestri — perdite cumulative")
     equipment_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                                    min_value=war.date.min().date(), max_value=war.date.max().date(),
+                                    min_value=war.date.min().date(), max_value=TODAY,
                                     key="equipment-dates")
     equipment_view = filter_dates(war, equipment_dates)
     selected_equipment = st.multiselect("Mezzi da visualizzare", equipment,
@@ -220,7 +221,7 @@ with economy_tab:
 
     st.subheader("Riserve internazionali* (settimanali, mld USD)")
     reserve_dates = st.date_input("Intervallo", (weekly.date.min().date(), weekly.date.max().date()),
-                                  min_value=weekly.date.min().date(), max_value=weekly.date.max().date(),
+                                  min_value=weekly.date.min().date(), max_value=TODAY,
                                   key="reserve-dates")
     weekly_view = filter_dates(weekly, reserve_dates)
     fig = px.line(weekly_view, x="date", y="reserves_bln_usd",
@@ -234,7 +235,7 @@ with economy_tab:
     st.subheader("Struttura delle riserve: valuta estera vs oro")
     st.caption("La voce valuta estera non separa yuan utilizzabili, asset occidentali congelati e altre componenti.")
     structure_dates = st.date_input("Intervallo", (monthly.date.min().date(), monthly.date.max().date()),
-                                    min_value=monthly.date.min().date(), max_value=monthly.date.max().date(),
+                                    min_value=monthly.date.min().date(), max_value=TODAY,
                                     key="structure-dates")
     monthly_view = filter_dates(monthly, structure_dates)
     fig2 = go.Figure()
@@ -249,7 +250,7 @@ with economy_tab:
 
     st.subheader("Tasso chiave (%)")
     rate_dates = st.date_input("Intervallo", (key_rate.date.min().date(), key_rate.date.max().date()),
-                               min_value=key_rate.date.min().date(), max_value=key_rate.date.max().date(),
+                               min_value=key_rate.date.min().date(), max_value=TODAY,
                                key="rate-dates")
     key_view = filter_dates(key_rate, rate_dates)
     fig3 = px.line(key_view, x="date", y="key_rate_pct", labels={"date": "", "key_rate_pct": "%"})
@@ -260,7 +261,7 @@ with economy_tab:
     st.subheader("Cambi ufficiali (₽ per unità)")
     st.caption("Tassi ufficiali CBR: non rappresentano necessariamente tutta la pressione di mercato sul rublo.")
     fx_dates = st.date_input("Intervallo", (fx.date.min().date(), fx.date.max().date()),
-                             min_value=fx.date.min().date(), max_value=fx.date.max().date(),
+                             min_value=fx.date.min().date(), max_value=TODAY,
                              key="fx-dates")
     fx_view = filter_dates(fx, fx_dates)
     currencies = st.multiselect("Valute da visualizzare", sorted(fx.currency.unique()),
@@ -287,7 +288,7 @@ with crea_tab:
     fuel_dates = st.date_input("Intervallo", (total_monthly.date.min().date(),
                                                total_monthly.date.max().date()),
                                min_value=total_monthly.date.min().date(),
-                               max_value=total_monthly.date.max().date(), key="crea-fuel-dates")
+                               max_value=TODAY, key="crea-fuel-dates")
     fuels = {"oil_eur_per_day": "Petrolio", "gas_eur_per_day": "Gas",
              "coal_eur_per_day": "Carbone"}
     selected_fuels = st.multiselect("Combustibili", fuels, default=list(fuels),
@@ -308,7 +309,7 @@ with crea_tab:
     region_dates = st.date_input("Intervallo", (regions_monthly.date.min().date(),
                                                  regions_monthly.date.max().date()),
                                  min_value=regions_monthly.date.min().date(),
-                                 max_value=regions_monthly.date.max().date(), key="crea-region-dates")
+                                 max_value=TODAY, key="crea-region-dates")
     available_regions = sorted(regions_monthly.destination_region.unique())
     selected_regions = st.multiselect("Destinazioni", available_regions,
                                       default=["China", "EU", "India", "Türkiye"],
@@ -374,7 +375,7 @@ with maritime_tab:
     load_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
                                                weekly_ports.week_ending.max().date()),
                                min_value=weekly_ports.week_ending.min().date(),
-                               max_value=weekly_ports.week_ending.max().date(), key="port-load-dates")
+                               max_value=TODAY, key="port-load-dates")
     load_ports = st.multiselect("Terminali", available_ports, default=default_ports,
                                 key="port-load-ports")
     load_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), load_dates)
@@ -389,7 +390,7 @@ with maritime_tab:
     volume_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
                                                  weekly_ports.week_ending.max().date()),
                                  min_value=weekly_ports.week_ending.min().date(),
-                                 max_value=weekly_ports.week_ending.max().date(), key="port-volume-dates")
+                                 max_value=TODAY, key="port-volume-dates")
     available_areas = sorted(weekly_ports.area.dropna().unique())
     volume_areas = st.multiselect("Aree", available_areas, default=available_areas,
                                   key="port-volume-areas")
@@ -413,7 +414,7 @@ with maritime_tab:
     heat_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
                                                weekly_ports.week_ending.max().date()),
                                min_value=weekly_ports.week_ending.min().date(),
-                               max_value=weekly_ports.week_ending.max().date(), key="port-heat-dates")
+                               max_value=TODAY, key="port-heat-dates")
     heat_ports = st.multiselect("Terminali", available_ports, default=default_ports,
                                 key="port-heat-ports")
     heat_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), heat_dates)
