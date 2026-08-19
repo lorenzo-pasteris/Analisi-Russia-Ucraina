@@ -142,39 +142,64 @@ with war_tab:
         box.metric(label, f"{int(last_war[total]):,}".replace(",", " "),
                    f"{int(last_war[daily]):+} nell'ultimo giorno")
 
-    war_ma = war.copy()
-    for col in ["daily_personnel", "daily_drones", "daily_cruise_missiles"]:
-        war_ma[f"{col}_ma7"] = war_ma[col].rolling(7).mean()
-    st.subheader("Perdite giornaliere di personale (media mobile 7gg)")
-    personnel_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                                    min_value=war.date.min().date(), max_value=TODAY,
-                                    key="personnel-dates")
-    personnel_view = filter_dates(war_ma, personnel_dates)
-    st.plotly_chart(px.line(personnel_view, x="date", y="daily_personnel_ma7",
-                           labels={"date": "", "daily_personnel_ma7": "uomini/giorno"}),
-                    width="stretch")
-    data_tools(personnel_view[["date", "personnel", "daily_personnel", "daily_personnel_ma7"]],
+    war_weekly = war.assign(
+        date=war.date + pd.to_timedelta(6 - war.date.dt.weekday, unit="D")
+    ).groupby("date", as_index=False).agg(
+        personnel=("daily_personnel", "sum"), drones=("daily_drones", "sum"),
+        cruise_missiles=("daily_cruise_missiles", "sum")
+    )
+    war_weekly = war_weekly[war_weekly.date <= war.date.max()]
+
+    st.subheader("Perdite di personale dichiarate — totali settimanali")
+    personnel_chart_col, personnel_controls = st.columns([3, 1])
+    with personnel_controls:
+        personnel_dates = st.date_input(
+            "Intervallo", (war_weekly.date.min().date(), war_weekly.date.max().date()),
+            min_value=war_weekly.date.min().date(), max_value=TODAY, key="personnel-dates")
+        personnel_window = st.selectbox("Media mobile", [1, 4, 8, 13], index=1,
+                                        format_func=lambda n: "Nessuna" if n == 1 else f"{n} settimane",
+                                        key="personnel-window")
+        personnel_raw = st.checkbox("Mostra totale settimanale", True, key="personnel-raw")
+    personnel_all = war_weekly.copy()
+    personnel_all["media_mobile"] = personnel_all.personnel.rolling(personnel_window).mean()
+    personnel_view = filter_dates(personnel_all, personnel_dates)
+    personnel_fig = go.Figure()
+    if personnel_raw:
+        personnel_fig.add_bar(x=personnel_view.date, y=personnel_view.personnel,
+                              name="Totale settimanale", opacity=.45)
+    personnel_fig.add_scatter(x=personnel_view.date, y=personnel_view.media_mobile,
+                              name="Media mobile", line_width=3)
+    personnel_fig.update_layout(yaxis_title="persone/settimana", legend_orientation="h")
+    personnel_chart_col.plotly_chart(personnel_fig, width="stretch")
+    data_tools(personnel_view,
                "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "perdite-personale")
 
-    st.subheader("UAV e missili da crociera dichiarati persi/distrutti (media mobile 7gg)")
-    missile_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                                  min_value=war.date.min().date(), max_value=TODAY,
-                                  key="missile-dates")
-    missile_view = filter_dates(war_ma, missile_dates)
-    air_weapons = {"daily_drones_ma7": "UAV", "daily_cruise_missiles_ma7": "Missili da crociera"}
-    selected_air_weapons = st.multiselect("Serie da visualizzare", air_weapons,
-                                          default=list(air_weapons), format_func=air_weapons.get,
-                                          key="air-weapons")
-    figw2 = go.Figure()
+    st.subheader("UAV e missili da crociera dichiarati persi/distrutti — totali settimanali")
+    air_chart_col, air_controls = st.columns([3, 1])
+    air_weapons = {"drones": "UAV", "cruise_missiles": "Missili da crociera"}
+    with air_controls:
+        missile_dates = st.date_input(
+            "Intervallo", (war_weekly.date.min().date(), war_weekly.date.max().date()),
+            min_value=war_weekly.date.min().date(), max_value=TODAY, key="missile-dates")
+        selected_air_weapons = st.multiselect("Serie", air_weapons, default=list(air_weapons),
+                                              format_func=air_weapons.get, key="air-weapons")
+        air_window = st.selectbox("Media mobile", [1, 4, 8, 13], index=1,
+                                  format_func=lambda n: "Nessuna" if n == 1 else f"{n} settimane",
+                                  key="air-window")
+    missile_all = war_weekly.copy()
+    for column in air_weapons:
+        missile_all[f"{column}_media"] = missile_all[column].rolling(air_window).mean()
+    missile_view = filter_dates(missile_all, missile_dates)
+    air_fig = go.Figure()
     for column in selected_air_weapons:
-        figw2.add_trace(go.Scatter(x=missile_view.date, y=missile_view[column],
-                                   name=air_weapons[column]))
-    figw2.update_layout(yaxis_title="unità/giorno", legend_orientation="h")
-    st.plotly_chart(figw2, width="stretch")
-    data_tools(missile_view[["date", "drones", "cruise_missiles", "daily_drones",
-                       "daily_cruise_missiles"]], "dataset open-source dei report ucraini",
+        air_fig.add_scatter(x=missile_view.date,
+                            y=missile_view[f"{column}_media"],
+                            name=air_weapons[column])
+    air_fig.update_layout(yaxis_title="unità/settimana", legend_orientation="h")
+    air_chart_col.plotly_chart(air_fig, width="stretch")
+    data_tools(missile_view[["date"] + selected_air_weapons], "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "droni-missili")
 
@@ -219,16 +244,39 @@ with economy_tab:
     c3.metric("USD/RUB", f"{last_usd.rub_per_unit:.2f} ₽")
     c4.metric("Quota oro nelle riserve", f"{gold_share:.1f} %")
 
-    st.subheader("Riserve internazionali* (settimanali, mld USD)")
-    reserve_dates = st.date_input("Intervallo", (weekly.date.min().date(), weekly.date.max().date()),
-                                  min_value=weekly.date.min().date(), max_value=TODAY,
-                                  key="reserve-dates")
-    weekly_view = filter_dates(weekly, reserve_dates)
-    fig = px.line(weekly_view, x="date", y="reserves_bln_usd",
-                  labels={"date": "", "reserves_bln_usd": "mld USD"})
-    fig.add_vline(x="2022-02-24", line_dash="dash", line_color="red",
-                  annotation_text="Invasione 24.02.2022")
-    st.plotly_chart(fig, width="stretch")
+    st.subheader("Riserve internazionali* — livello e variazioni")
+    reserve_chart_col, reserve_controls = st.columns([3, 1])
+    with reserve_controls:
+        reserve_dates = st.date_input(
+            "Intervallo", (weekly.date.min().date(), weekly.date.max().date()),
+            min_value=weekly.date.min().date(), max_value=TODAY, key="reserve-dates")
+        reserve_mode = st.radio("Visualizzazione", ["Livello", "Variazione settimanale"],
+                                key="reserve-mode")
+        reserve_window = st.selectbox("Media mobile", [1, 4, 13], index=1,
+                                      format_func=lambda n: "Nessuna" if n == 1 else f"{n} settimane",
+                                      key="reserve-window")
+    reserve_all = weekly.copy()
+    reserve_all["variazione_mld"] = reserve_all.reserves_bln_usd.diff()
+    reserve_all["media_livello"] = reserve_all.reserves_bln_usd.rolling(reserve_window).mean()
+    reserve_all["media_variazione"] = reserve_all.variazione_mld.rolling(reserve_window).mean()
+    weekly_view = filter_dates(reserve_all, reserve_dates)
+    fig = go.Figure()
+    if reserve_mode == "Livello":
+        fig.add_scatter(x=weekly_view.date, y=weekly_view.reserves_bln_usd,
+                        name="Riserve", line_width=1)
+        fig.add_scatter(x=weekly_view.date, y=weekly_view.media_livello,
+                        name="Media mobile", line_width=3)
+        fig.update_yaxes(title="mld USD")
+    else:
+        fig.add_bar(x=weekly_view.date, y=weekly_view.variazione_mld,
+                    name="Variazione", marker_color=weekly_view.variazione_mld.apply(
+                        lambda value: "#2ca02c" if value >= 0 else "#d62728"))
+        fig.add_scatter(x=weekly_view.date, y=weekly_view.media_variazione,
+                        name="Media mobile", line_width=3)
+        fig.update_yaxes(title="variazione settimanale, mld USD")
+    fig.add_vline(x="2022-02-24", line_dash="dash", line_color="red")
+    fig.update_layout(legend_orientation="h")
+    reserve_chart_col.plotly_chart(fig, width="stretch")
     data_tools(weekly_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/",
                "riserve-settimanali")
 
@@ -260,15 +308,34 @@ with economy_tab:
 
     st.subheader("Cambi ufficiali (₽ per unità)")
     st.caption("Tassi ufficiali CBR: non rappresentano necessariamente tutta la pressione di mercato sul rublo.")
-    fx_dates = st.date_input("Intervallo", (fx.date.min().date(), fx.date.max().date()),
-                             min_value=fx.date.min().date(), max_value=TODAY,
-                             key="fx-dates")
-    fx_view = filter_dates(fx, fx_dates)
-    currencies = st.multiselect("Valute da visualizzare", sorted(fx.currency.unique()),
-                                default=sorted(fx.currency.unique()), key="currencies")
+    fx_chart_col, fx_controls = st.columns([3, 1])
+    with fx_controls:
+        fx_dates = st.date_input("Intervallo", (fx.date.min().date(), fx.date.max().date()),
+                                 min_value=fx.date.min().date(), max_value=TODAY,
+                                 key="fx-dates")
+        currencies = st.multiselect("Valute", sorted(fx.currency.unique()),
+                                    default=sorted(fx.currency.unique()), key="currencies")
+        fx_mode = st.selectbox("Visualizzazione",
+                               ["Cambio ufficiale", "Indice 100", "Variazione giornaliera %",
+                                "Volatilità mobile 20 giorni"], key="fx-mode")
+    fx_analysis = fx.copy()
+    fx_analysis["variazione_pct"] = fx_analysis.groupby("currency").rub_per_unit.pct_change() * 100
+    fx_analysis["volatilita_20"] = fx_analysis.groupby("currency").variazione_pct.transform(
+        lambda values: values.rolling(20).std())
+    fx_view = filter_dates(fx_analysis, fx_dates).copy()
     fx_view = fx_view[fx_view.currency.isin(currencies)]
-    st.plotly_chart(px.line(fx_view, x="date", y="rub_per_unit", color="currency",
-                           labels={"date": "", "rub_per_unit": "₽"}), width="stretch")
+    fx_view["indice_100"] = fx_view.groupby("currency").rub_per_unit.transform(
+        lambda values: values / values.iloc[0] * 100)
+    fx_columns = {
+        "Cambio ufficiale": ("rub_per_unit", "₽ per unità"),
+        "Indice 100": ("indice_100", "indice (inizio intervallo = 100)"),
+        "Variazione giornaliera %": ("variazione_pct", "% giornaliera"),
+        "Volatilità mobile 20 giorni": ("volatilita_20", "deviazione standard, %"),
+    }
+    fx_column, fx_label = fx_columns[fx_mode]
+    fx_chart_col.plotly_chart(px.line(fx_view, x="date", y=fx_column, color="currency",
+                                      labels={"date": "", fx_column: fx_label,
+                                              "currency": "Valuta"}), width="stretch")
     data_tools(fx_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "cambi")
 
 with crea_tab:
@@ -285,23 +352,40 @@ with crea_tab:
 
     st.subheader("Ricavi per combustibile — media giornaliera mensile")
     total_monthly = crea_monthly[crea_monthly.destination_region == "Total"]
-    fuel_dates = st.date_input("Intervallo", (total_monthly.date.min().date(),
-                                               total_monthly.date.max().date()),
-                               min_value=total_monthly.date.min().date(),
-                               max_value=TODAY, key="crea-fuel-dates")
     fuels = {"oil_eur_per_day": "Petrolio", "gas_eur_per_day": "Gas",
              "coal_eur_per_day": "Carbone"}
-    selected_fuels = st.multiselect("Combustibili", fuels, default=list(fuels),
-                                    format_func=fuels.get, key="crea-fuels")
-    fuel_view = filter_dates(total_monthly, fuel_dates)
-    fuel_chart = fuel_view.melt("date", value_vars=selected_fuels,
-                                var_name="combustibile", value_name="eur_per_day")
-    fuel_chart["combustibile"] = fuel_chart.combustibile.map(fuels)
-    fuel_chart["mln_eur_giorno"] = fuel_chart.eur_per_day / 1e6
-    st.plotly_chart(px.area(fuel_chart, x="date", y="mln_eur_giorno", color="combustibile",
-                           labels={"date": "", "mln_eur_giorno": "mln EUR/giorno",
-                                   "combustibile": "Combustibile"}), width="stretch")
-    data_tools(fuel_view[["date"] + selected_fuels], "Russia Fossil Tracker — CREA",
+    fuel_chart_col, fuel_controls = st.columns([3, 1])
+    with fuel_controls:
+        fuel_dates = st.date_input("Intervallo", (total_monthly.date.min().date(),
+                                                   total_monthly.date.max().date()),
+                                   min_value=total_monthly.date.min().date(),
+                                   max_value=TODAY, key="crea-fuel-dates")
+        selected_fuels = st.multiselect("Combustibili", fuels, default=list(fuels),
+                                        format_func=fuels.get, key="crea-fuels")
+        fuel_mode = st.selectbox("Visualizzazione",
+                                 ["Valore mensile", "Media mobile 3 mesi", "Variazione annua %"],
+                                 key="crea-fuel-mode")
+    fuel_analysis = total_monthly.copy()
+    suffix = {"Valore mensile": "", "Media mobile 3 mesi": "_ma3",
+              "Variazione annua %": "_yoy"}[fuel_mode]
+    for column in fuels:
+        fuel_analysis[f"{column}_ma3"] = fuel_analysis[column].rolling(3).mean()
+        fuel_analysis[f"{column}_yoy"] = fuel_analysis[column].pct_change(12) * 100
+    fuel_view = filter_dates(fuel_analysis, fuel_dates)
+    value_columns = [f"{column}{suffix}" for column in selected_fuels]
+    fuel_chart = fuel_view.melt("date", value_vars=value_columns,
+                                var_name="combustibile", value_name="valore")
+    fuel_chart["combustibile"] = fuel_chart.combustibile.str.replace(
+        suffix + "$", "", regex=True).map(fuels) if suffix else fuel_chart.combustibile.map(fuels)
+    if fuel_mode != "Variazione annua %":
+        fuel_chart["valore"] /= 1e6
+    fuel_label = "% rispetto allo stesso mese dell'anno precedente" if suffix == "_yoy" else "mln EUR/giorno"
+    fuel_figure = px.area if fuel_mode == "Valore mensile" else px.line
+    fuel_chart_col.plotly_chart(fuel_figure(
+        fuel_chart, x="date", y="valore", color="combustibile",
+        labels={"date": "", "valore": fuel_label, "combustibile": "Combustibile"}),
+        width="stretch")
+    data_tools(fuel_view[["date"] + value_columns], "Russia Fossil Tracker — CREA",
                "https://www.russiafossiltracker.com/", "crea-ricavi-combustibile")
 
     st.subheader("Ricavi per destinazione — media giornaliera mensile")
@@ -357,15 +441,19 @@ with maritime_tab:
     weekly_total = weekly_ports.groupby("week_ending", as_index=False).agg(
         trade_count=("trade_count", "sum"), value_tonne=("value_tonne", "sum")
     ).sort_values("week_ending")
+    weekly_total["tonnes_per_operation"] = weekly_total.value_tonne / weekly_total.trade_count
     latest, previous = weekly_total.iloc[-1], weekly_total.iloc[-2]
     four_week = weekly_total.tail(4).value_tonne.mean()
-    s1, s2, s3, s4 = st.columns(4)
+    previous_four = weekly_total.iloc[-8:-4].value_tonne.mean()
+    s1, s2, s3, s4, s5 = st.columns(5)
     s1.metric("Carichi nell'ultima settimana", f"{int(latest.trade_count)}",
               f"{latest.trade_count - previous.trade_count:+.0f} vs precedente")
     s2.metric("Volume settimanale", f"{latest.value_tonne / 1e6:.2f} mln t",
               f"{(latest.value_tonne / previous.value_tonne - 1) * 100:+.1f}%")
     s3.metric("Media mobile 4 settimane", f"{four_week / 1e6:.2f} mln t")
-    s4.metric("Settimana conclusa", latest.week_ending.strftime("%d/%m/%Y"))
+    s4.metric("4 settimane vs 4 precedenti", f"{(four_week / previous_four - 1) * 100:+.1f}%")
+    s5.metric("Tonnellate per operazione", f"{latest.tonnes_per_operation / 1e3:.0f} mila")
+    st.caption(f"Ultima settimana completa: {latest.week_ending:%d/%m/%Y}")
 
     main_ports = ["Primorsk", "Ust Luga", "Novorossiysk", "Murmansk", "Kozmino",
                   "De Kastri", "Varandey"]
@@ -387,26 +475,34 @@ with maritime_tab:
                "https://api.russiafossiltracker.com/", "crea-carichi-porti")
 
     st.subheader("Volume settimanale e media mobile a quattro settimane")
-    volume_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
-                                                 weekly_ports.week_ending.max().date()),
-                                 min_value=weekly_ports.week_ending.min().date(),
-                                 max_value=TODAY, key="port-volume-dates")
+    volume_chart_col, volume_controls = st.columns([3, 1])
     available_areas = sorted(weekly_ports.area.dropna().unique())
-    volume_areas = st.multiselect("Aree", available_areas, default=available_areas,
-                                  key="port-volume-areas")
+    with volume_controls:
+        volume_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
+                                                     weekly_ports.week_ending.max().date()),
+                                     min_value=weekly_ports.week_ending.min().date(),
+                                     max_value=TODAY, key="port-volume-dates")
+        volume_areas = st.multiselect("Aree", available_areas, default=available_areas,
+                                      key="port-volume-areas")
+        maritime_mode = st.selectbox("Indicatore", ["Volume", "Tonnellate per operazione"],
+                                     key="maritime-mode")
     volume_all = weekly_ports[weekly_ports.area.isin(volume_areas)].groupby(
-        "week_ending", as_index=False).value_tonne.sum().sort_values("week_ending")
+        "week_ending", as_index=False).agg(value_tonne=("value_tonne", "sum"),
+                                            trade_count=("trade_count", "sum")).sort_values("week_ending")
     volume_all["volume_mln_t"] = volume_all.value_tonne / 1e6
-    volume_all["media_4_settimane"] = volume_all.volume_mln_t.rolling(4).mean()
+    volume_all["tonnellate_operazione"] = volume_all.value_tonne / volume_all.trade_count
+    base_column = "volume_mln_t" if maritime_mode == "Volume" else "tonnellate_operazione"
+    volume_all["media_4_settimane"] = volume_all[base_column].rolling(4).mean()
     volume_view = filter_dates(volume_all.rename(columns={"week_ending": "date"}), volume_dates)
-    volume_chart = volume_view.melt("date", value_vars=["volume_mln_t", "media_4_settimane"],
-                                    var_name="serie", value_name="milioni_tonnellate")
+    volume_chart = volume_view.melt("date", value_vars=[base_column, "media_4_settimane"],
+                                    var_name="serie", value_name="valore")
     volume_chart["serie"] = volume_chart.serie.map(
-        {"volume_mln_t": "Volume settimanale", "media_4_settimane": "Media mobile 4 settimane"}
+        {base_column: maritime_mode, "media_4_settimane": "Media mobile 4 settimane"}
     )
-    st.plotly_chart(px.line(volume_chart, x="date", y="milioni_tonnellate", color="serie",
-                           labels={"date": "", "milioni_tonnellate": "milioni di tonnellate",
-                                   "serie": ""}), width="stretch")
+    maritime_label = "milioni di tonnellate" if maritime_mode == "Volume" else "tonnellate per operazione"
+    volume_chart_col.plotly_chart(px.line(
+        volume_chart, x="date", y="valore", color="serie",
+        labels={"date": "", "valore": maritime_label, "serie": ""}), width="stretch")
     data_tools(volume_view, "Russia Fossil Tracker — CREA",
                "https://api.russiafossiltracker.com/", "crea-volumi-marittimi")
 
