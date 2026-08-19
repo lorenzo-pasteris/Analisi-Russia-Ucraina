@@ -40,10 +40,37 @@ def load(name: str, required: tuple[str, ...] = ()) -> pd.DataFrame:
 
 
 def filter_dates(df: pd.DataFrame, dates) -> pd.DataFrame:
+    if isinstance(dates, dict):
+        if dates["mode"] == "Confronto anni":
+            return df[df.date.dt.year.isin(dates["years"])]
+        dates = dates["dates"]
     if len(dates) != 2:
         return df
     start, end = pd.Timestamp(dates[0]), pd.Timestamp(dates[1])
     return df[df.date.between(start, end)]
+
+
+def date_range(min_date, max_date, key: str):
+    mode = st.radio("Filtro temporale", ["Da / A", "Periodo rapido", "Confronto anni"],
+                    horizontal=True, key=f"{key}-mode")
+    if mode == "Da / A":
+        start_col, end_col = st.columns(2)
+        start = start_col.date_input("Da", min_date, min_value=min_date, max_value=TODAY,
+                                     key=f"{key}-start")
+        end = end_col.date_input("A", max_date, min_value=min_date, max_value=TODAY,
+                                 key=f"{key}-end")
+        return {"mode": mode, "dates": (min(start, end), max(start, end))}
+    if mode == "Periodo rapido":
+        preset = st.selectbox("Periodo", ["Ultima settimana", "Ultimo mese",
+                                           "Ultimo anno", "Tutto"], key=f"{key}-preset")
+        days = {"Ultima settimana": 6, "Ultimo mese": 29, "Ultimo anno": 364}
+        start = min_date if preset == "Tutto" else max(
+            min_date, max_date - pd.Timedelta(days=days[preset]))
+        return {"mode": mode, "dates": (start, max_date)}
+    available_years = list(range(min_date.year, max_date.year + 1))
+    selected_years = st.multiselect("Anni da confrontare", available_years,
+                                    default=available_years[-2:], key=f"{key}-years")
+    return {"mode": mode, "years": selected_years}
 
 
 def excel_bytes(df: pd.DataFrame, sheet_name: str = "Dati") -> bytes:
@@ -153,9 +180,8 @@ with war_tab:
     st.subheader("Perdite di personale dichiarate — totali settimanali")
     personnel_date_col, personnel_window_col, personnel_raw_col = st.columns([2, 1, 1])
     with personnel_date_col:
-        personnel_dates = st.date_input(
-            "Intervallo", (war_weekly.date.min().date(), war_weekly.date.max().date()),
-            min_value=war_weekly.date.min().date(), max_value=TODAY, key="personnel-dates")
+        personnel_dates = date_range(war_weekly.date.min().date(),
+                                     war_weekly.date.max().date(), "personnel-dates")
     with personnel_window_col:
         personnel_window = st.selectbox("Media mobile", [1, 4, 8, 13], index=1,
                                         format_func=lambda n: "Nessuna" if n == 1 else f"{n} settimane",
@@ -182,9 +208,8 @@ with war_tab:
     air_date_col, air_series_col, air_window_col = st.columns([2, 1, 1])
     air_weapons = {"drones": "UAV", "cruise_missiles": "Missili da crociera"}
     with air_date_col:
-        missile_dates = st.date_input(
-            "Intervallo", (war_weekly.date.min().date(), war_weekly.date.max().date()),
-            min_value=war_weekly.date.min().date(), max_value=TODAY, key="missile-dates")
+        missile_dates = date_range(war_weekly.date.min().date(),
+                                   war_weekly.date.max().date(), "missile-dates")
     with air_series_col:
         selected_air_weapons = st.multiselect("Serie", air_weapons, default=list(air_weapons),
                                               format_func=air_weapons.get, key="air-weapons")
@@ -210,9 +235,7 @@ with war_tab:
     equipment = {"tanks": "Carri armati", "apc": "Blindati (APC)",
                  "artillery": "Artiglieria"}
     st.subheader("Mezzi terrestri — perdite cumulative")
-    equipment_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
-                                    min_value=war.date.min().date(), max_value=TODAY,
-                                    key="equipment-dates")
+    equipment_dates = date_range(war.date.min().date(), war.date.max().date(), "equipment-dates")
     equipment_view = filter_dates(war, equipment_dates)
     selected_equipment = st.multiselect("Mezzi da visualizzare", equipment,
                                         default=list(equipment), format_func=equipment.get)
@@ -251,9 +274,8 @@ with economy_tab:
     st.subheader("Riserve internazionali* — livello e variazioni")
     reserve_date_col, reserve_mode_col, reserve_window_col = st.columns([2, 1, 1])
     with reserve_date_col:
-        reserve_dates = st.date_input(
-            "Intervallo", (weekly.date.min().date(), weekly.date.max().date()),
-            min_value=weekly.date.min().date(), max_value=TODAY, key="reserve-dates")
+        reserve_dates = date_range(weekly.date.min().date(), weekly.date.max().date(),
+                                   "reserve-dates")
     with reserve_mode_col:
         reserve_mode = st.radio("Visualizzazione", ["Livello", "Variazione settimanale"],
                                 key="reserve-mode")
@@ -288,9 +310,8 @@ with economy_tab:
 
     st.subheader("Struttura delle riserve: valuta estera vs oro")
     st.caption("La voce valuta estera non separa yuan utilizzabili, asset occidentali congelati e altre componenti.")
-    structure_dates = st.date_input("Intervallo", (monthly.date.min().date(), monthly.date.max().date()),
-                                    min_value=monthly.date.min().date(), max_value=TODAY,
-                                    key="structure-dates")
+    structure_dates = date_range(monthly.date.min().date(), monthly.date.max().date(),
+                                 "structure-dates")
     monthly_view = filter_dates(monthly, structure_dates)
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(x=monthly_view.date, y=monthly_view.fx_mln_usd,
@@ -303,9 +324,7 @@ with economy_tab:
                "struttura-riserve")
 
     st.subheader("Tasso chiave (%)")
-    rate_dates = st.date_input("Intervallo", (key_rate.date.min().date(), key_rate.date.max().date()),
-                               min_value=key_rate.date.min().date(), max_value=TODAY,
-                               key="rate-dates")
+    rate_dates = date_range(key_rate.date.min().date(), key_rate.date.max().date(), "rate-dates")
     key_view = filter_dates(key_rate, rate_dates)
     fig3 = px.line(key_view, x="date", y="key_rate_pct", labels={"date": "", "key_rate_pct": "%"})
     fig3.update_traces(line_shape="hv")
@@ -316,9 +335,7 @@ with economy_tab:
     st.caption("Tassi ufficiali CBR: non rappresentano necessariamente tutta la pressione di mercato sul rublo.")
     fx_date_col, fx_currency_col, fx_mode_col = st.columns([2, 1, 1])
     with fx_date_col:
-        fx_dates = st.date_input("Intervallo", (fx.date.min().date(), fx.date.max().date()),
-                                 min_value=fx.date.min().date(), max_value=TODAY,
-                                 key="fx-dates")
+        fx_dates = date_range(fx.date.min().date(), fx.date.max().date(), "fx-dates")
     with fx_currency_col:
         currencies = st.multiselect("Valute", sorted(fx.currency.unique()),
                                     default=sorted(fx.currency.unique()), key="currencies")
@@ -364,10 +381,8 @@ with crea_tab:
              "coal_eur_per_day": "Carbone"}
     fuel_date_col, fuel_series_col, fuel_mode_col = st.columns([2, 1, 1])
     with fuel_date_col:
-        fuel_dates = st.date_input("Intervallo", (total_monthly.date.min().date(),
-                                                   total_monthly.date.max().date()),
-                                   min_value=total_monthly.date.min().date(),
-                                   max_value=TODAY, key="crea-fuel-dates")
+        fuel_dates = date_range(total_monthly.date.min().date(),
+                                total_monthly.date.max().date(), "crea-fuel-dates")
     with fuel_series_col:
         selected_fuels = st.multiselect("Combustibili", fuels, default=list(fuels),
                                         format_func=fuels.get, key="crea-fuels")
@@ -400,10 +415,8 @@ with crea_tab:
 
     st.subheader("Ricavi per destinazione — media giornaliera mensile")
     regions_monthly = crea_monthly[crea_monthly.destination_region != "Total"]
-    region_dates = st.date_input("Intervallo", (regions_monthly.date.min().date(),
-                                                 regions_monthly.date.max().date()),
-                                 min_value=regions_monthly.date.min().date(),
-                                 max_value=TODAY, key="crea-region-dates")
+    region_dates = date_range(regions_monthly.date.min().date(),
+                              regions_monthly.date.max().date(), "crea-region-dates")
     available_regions = sorted(regions_monthly.destination_region.unique())
     selected_regions = st.multiselect("Destinazioni", available_regions,
                                       default=["China", "EU", "India", "Türkiye"],
@@ -470,10 +483,8 @@ with maritime_tab:
     available_ports = sorted(weekly_ports.port.unique())
     default_ports = [port for port in main_ports if port in available_ports]
     st.subheader("Carichi settimanali per terminale")
-    load_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
-                                               weekly_ports.week_ending.max().date()),
-                               min_value=weekly_ports.week_ending.min().date(),
-                               max_value=TODAY, key="port-load-dates")
+    load_dates = date_range(weekly_ports.week_ending.min().date(),
+                            weekly_ports.week_ending.max().date(), "port-load-dates")
     load_ports = st.multiselect("Terminali", available_ports, default=default_ports,
                                 key="port-load-ports")
     load_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), load_dates)
@@ -488,10 +499,8 @@ with maritime_tab:
     available_areas = sorted(weekly_ports.area.dropna().unique())
     volume_date_col, volume_area_col, volume_mode_col = st.columns([2, 1, 1])
     with volume_date_col:
-        volume_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
-                                                     weekly_ports.week_ending.max().date()),
-                                     min_value=weekly_ports.week_ending.min().date(),
-                                     max_value=TODAY, key="port-volume-dates")
+        volume_dates = date_range(weekly_ports.week_ending.min().date(),
+                                  weekly_ports.week_ending.max().date(), "port-volume-dates")
     with volume_area_col:
         volume_areas = st.multiselect("Aree", available_areas, default=available_areas,
                                       key="port-volume-areas")
@@ -519,10 +528,8 @@ with maritime_tab:
                "https://api.russiafossiltracker.com/", "crea-volumi-marittimi")
 
     st.subheader("Mappa temporale dell'attività dei terminali")
-    heat_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
-                                               weekly_ports.week_ending.max().date()),
-                               min_value=weekly_ports.week_ending.min().date(),
-                               max_value=TODAY, key="port-heat-dates")
+    heat_dates = date_range(weekly_ports.week_ending.min().date(),
+                            weekly_ports.week_ending.max().date(), "port-heat-dates")
     heat_ports = st.multiselect("Terminali", available_ports, default=default_ports,
                                 key="port-heat-ports")
     heat_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), heat_dates)
