@@ -61,6 +61,7 @@ fx = load("fx_rates.csv")
 war = load("war_losses.csv")
 crea_monthly = load("crea_monthly.csv")
 crea_counter = pd.read_csv(os.path.join(DATA_DIR, "crea_counter.csv"))
+crea_ports = load("crea_ports_daily.csv")
 
 # ================== ANALISI INTRODUTTIVA ==================
 with st.expander("‼️ Come leggere questi dati — metodologia e avvertenze", expanded=False):
@@ -96,8 +97,9 @@ sopra il 15-20% segnalano un'economia in surriscaldamento da economia di guerra.
 """)
 
 st.divider()
-war_tab, economy_tab, crea_tab, data_tab = st.tabs(
-    ["⚔️ Guerra", "🏦 Economia", "⛽ Energia CREA", "📋 Dati e fonti"]
+war_tab, economy_tab, crea_tab, maritime_tab, data_tab = st.tabs(
+    ["⚔️ Guerra", "🏦 Economia", "⛽ Energia CREA", "🚢 Flussi marittimi",
+     "📋 Dati e fonti"]
 )
 
 with war_tab:
@@ -296,6 +298,98 @@ with crea_tab:
     st.info("CREA combina dati Kpler, Eurostat, ENTSOG, UN Comtrade e modelli di prezzo. "
             "Le serie sono stime, non contabilità ufficiale russa, e possono essere riviste.")
 
+with maritime_tab:
+    st.header("Esportazioni marittime russe di greggio")
+    st.caption("Dati CREA/Kpler · settimane concluse la domenica · `trade_count` indica "
+               "operazioni commerciali, non necessariamente navi uniche")
+    ports_daily = crea_ports.copy()
+    ports_daily["week_ending"] = (
+        ports_daily.date + pd.to_timedelta(6 - ports_daily.date.dt.weekday, unit="D")
+    )
+    weekly_ports = ports_daily.groupby(["week_ending", "port", "area"], as_index=False).agg(
+        trade_count=("trade_count", "sum"), value_tonne=("value_tonne", "sum"),
+        value_m3=("value_m3", "sum"), value_eur=("value_eur", "sum"),
+    )
+    weekly_ports = weekly_ports[weekly_ports.week_ending <= ports_daily.date.max()]
+    weekly_total = weekly_ports.groupby("week_ending", as_index=False).agg(
+        trade_count=("trade_count", "sum"), value_tonne=("value_tonne", "sum")
+    ).sort_values("week_ending")
+    latest, previous = weekly_total.iloc[-1], weekly_total.iloc[-2]
+    four_week = weekly_total.tail(4).value_tonne.mean()
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Carichi nell'ultima settimana", f"{int(latest.trade_count)}",
+              f"{latest.trade_count - previous.trade_count:+.0f} vs precedente")
+    s2.metric("Volume settimanale", f"{latest.value_tonne / 1e6:.2f} mln t",
+              f"{(latest.value_tonne / previous.value_tonne - 1) * 100:+.1f}%")
+    s3.metric("Media mobile 4 settimane", f"{four_week / 1e6:.2f} mln t")
+    s4.metric("Settimana conclusa", latest.week_ending.strftime("%d/%m/%Y"))
+
+    main_ports = ["Primorsk", "Ust Luga", "Novorossiysk", "Murmansk", "Kozmino",
+                  "De Kastri", "Varandey"]
+    available_ports = sorted(weekly_ports.port.unique())
+    default_ports = [port for port in main_ports if port in available_ports]
+    st.subheader("Carichi settimanali per terminale")
+    load_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
+                                               weekly_ports.week_ending.max().date()),
+                               min_value=weekly_ports.week_ending.min().date(),
+                               max_value=weekly_ports.week_ending.max().date(), key="port-load-dates")
+    load_ports = st.multiselect("Terminali", available_ports, default=default_ports,
+                                key="port-load-ports")
+    load_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), load_dates)
+    load_view = load_view[load_view.port.isin(load_ports)]
+    st.plotly_chart(px.bar(load_view, x="date", y="trade_count", color="port",
+                          labels={"date": "", "trade_count": "operazioni di carico",
+                                  "port": "Terminale"}), width="stretch")
+    data_tools(load_view, "Russia Fossil Tracker — CREA",
+               "https://api.russiafossiltracker.com/", "crea-carichi-porti")
+
+    st.subheader("Volume settimanale e media mobile a quattro settimane")
+    volume_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
+                                                 weekly_ports.week_ending.max().date()),
+                                 min_value=weekly_ports.week_ending.min().date(),
+                                 max_value=weekly_ports.week_ending.max().date(), key="port-volume-dates")
+    available_areas = sorted(weekly_ports.area.dropna().unique())
+    volume_areas = st.multiselect("Aree", available_areas, default=available_areas,
+                                  key="port-volume-areas")
+    volume_all = weekly_ports[weekly_ports.area.isin(volume_areas)].groupby(
+        "week_ending", as_index=False).value_tonne.sum().sort_values("week_ending")
+    volume_all["volume_mln_t"] = volume_all.value_tonne / 1e6
+    volume_all["media_4_settimane"] = volume_all.volume_mln_t.rolling(4).mean()
+    volume_view = filter_dates(volume_all.rename(columns={"week_ending": "date"}), volume_dates)
+    volume_chart = volume_view.melt("date", value_vars=["volume_mln_t", "media_4_settimane"],
+                                    var_name="serie", value_name="milioni_tonnellate")
+    volume_chart["serie"] = volume_chart.serie.map(
+        {"volume_mln_t": "Volume settimanale", "media_4_settimane": "Media mobile 4 settimane"}
+    )
+    st.plotly_chart(px.line(volume_chart, x="date", y="milioni_tonnellate", color="serie",
+                           labels={"date": "", "milioni_tonnellate": "milioni di tonnellate",
+                                   "serie": ""}), width="stretch")
+    data_tools(volume_view, "Russia Fossil Tracker — CREA",
+               "https://api.russiafossiltracker.com/", "crea-volumi-marittimi")
+
+    st.subheader("Mappa temporale dell'attività dei terminali")
+    heat_dates = st.date_input("Intervallo", (weekly_ports.week_ending.min().date(),
+                                               weekly_ports.week_ending.max().date()),
+                               min_value=weekly_ports.week_ending.min().date(),
+                               max_value=weekly_ports.week_ending.max().date(), key="port-heat-dates")
+    heat_ports = st.multiselect("Terminali", available_ports, default=default_ports,
+                                key="port-heat-ports")
+    heat_view = filter_dates(weekly_ports.rename(columns={"week_ending": "date"}), heat_dates)
+    heat_view = heat_view[heat_view.port.isin(heat_ports)]
+    heat_table = heat_view.pivot_table(index="port", columns="date", values="trade_count",
+                                       aggfunc="sum", fill_value=0)
+    heatmap = go.Figure(go.Heatmap(x=heat_table.columns, y=heat_table.index,
+                                   z=heat_table.values, colorscale="Blues",
+                                   colorbar_title="carichi"))
+    heatmap.update_layout(xaxis_title="", yaxis_title="")
+    st.plotly_chart(heatmap, width="stretch")
+    data_tools(heat_view, "Russia Fossil Tracker — CREA",
+               "https://api.russiafossiltracker.com/", "crea-heatmap-porti")
+    st.caption("Confronto editoriale: [ultimo aggiornamento settimanale di Julian Lee su Bloomberg]"
+               "(https://www.bloomberg.com/news/articles/2026-08-18/"
+               "russia-s-oil-exports-extend-their-slump-amid-ukrainian-drone-strikes). "
+               "Le metodologie Bloomberg e CREA non sono direttamente equivalenti.")
+
 with data_tab:
     st.header("Tutti i dati")
     st.markdown("- [Banca Centrale Russa](https://www.cbr.ru/development/DWS/)\n"
@@ -307,7 +401,7 @@ with data_tab:
         for name, df in {"Guerra": war, "Riserve settimanali": weekly,
                          "Riserve mensili": monthly, "Tasso chiave": key_rate,
                          "Cambi": fx, "CREA mensile": crea_monthly,
-                         "CREA cumulativo": crea_counter}.items():
+                         "CREA cumulativo": crea_counter, "CREA porti": crea_ports}.items():
             df.to_excel(writer, sheet_name=name, index=False)
     st.download_button("⬇️ Scarica tutti i dati in Excel", all_data.getvalue(),
                        "russia-tracker-dati.xlsx", key="xlsx-all")

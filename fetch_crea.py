@@ -20,7 +20,7 @@ def download(path: str, params: dict[str, str]) -> list[dict[str, str]]:
 
 def write_csv(filename: str, rows: list[dict], fields: list[str]) -> None:
     with open(os.path.join(DATA_DIR, filename), "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fields)
+        writer = csv.DictWriter(file, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -60,7 +60,20 @@ def main() -> None:
         counter.append({field: ("Total" if field == "destination_region" and row[field] == "total"
                                 else row[field]) for field in counter_fields})
     write_csv("crea_counter.csv", counter, counter_fields)
-    print(f"[crea] OK: {len(monthly)} righe mensili, {len(counter)} destinazioni")
+
+    ports_raw = download("/v0/chart/departure_by_port", {
+        "departure_date_from": "2022-02-24", "commodity": "crude_oil",
+        "format": "csv", "nest_in_data": "false",
+    })
+    port_fields = ["date", "port", "area", "value_tonne", "value_m3", "trade_count",
+                   "value_eur"]
+    ports = [{"date": row["departure_date"][:10], "port": row["origin_port_name"],
+              "area": row["origin_area"], "value_tonne": row["value_tonne"],
+              "value_m3": row["value_m3"], "trade_count": row["trade_count"],
+              "value_eur": row["value_eur"]} for row in ports_raw]
+    write_csv("crea_ports_daily.csv", ports, port_fields)
+    print(f"[crea] OK: {len(monthly)} righe mensili, {len(counter)} destinazioni, "
+          f"{len(ports)} righe portuali")
 
 
 if __name__ == "__main__":
