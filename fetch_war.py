@@ -35,6 +35,14 @@ EQUIPMENT_COLS = {
 }
 
 
+def add_daily_deltas(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Mantiene anche i delta negativi: sono revisioni della fonte."""
+    for column in columns:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+        df[f"daily_{column}"] = df[column].diff()
+    return df
+
+
 def main() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -53,9 +61,7 @@ def main() -> None:
 
     # Delta giornalieri (i valori sorgente sono cumulativi)
     value_cols = ["personnel"] + list(EQUIPMENT_COLS.values())
-    for c in value_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-        df[f"daily_{c}"] = df[c].diff().clip(lower=0)  # clip: correzioni al ribasso -> 0
+    df = add_daily_deltas(df, value_cols)
 
     path = os.path.join(DATA_DIR, "war_losses.csv")
     df.to_csv(path, index=False)

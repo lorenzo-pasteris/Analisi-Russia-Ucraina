@@ -19,13 +19,22 @@ st.set_page_config(page_title="Russia Tracker", page_icon="📊", layout="wide")
 st.title("📊 Russia Tracker — economia, energia e guerra")
 st.caption(
     "Riserve e dati CBR: aggiornamento settimanale (giovedì) · "
-    "Perdite/attacchi: aggiornamento giornaliero · tutto automatico via GitHub Actions"
+    "Perdite dichiarate: aggiornamento giornaliero · tutto automatico via GitHub Actions"
 )
 
 
 @st.cache_data(ttl=3600)
-def load(name: str) -> pd.DataFrame:
-    df = pd.read_csv(os.path.join(DATA_DIR, name), parse_dates=["date"])
+def load(name: str, required: tuple[str, ...] = ()) -> pd.DataFrame:
+    path = os.path.join(DATA_DIR, name)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        raise ValueError(f"{name}: file mancante o vuoto")
+    df = pd.read_csv(path)
+    missing = {"date", *required} - set(df.columns)
+    if df.empty or missing:
+        raise ValueError(f"{name}: dati vuoti o colonne mancanti ({', '.join(sorted(missing))})")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    if df.date.isna().any():
+        raise ValueError(f"{name}: contiene date non valide")
     return df.sort_values("date")
 
 
@@ -54,21 +63,27 @@ def data_tools(df: pd.DataFrame, source_label: str, source_url: str, filename: s
                               f"{filename}.xlsx", key=f"xlsx-{filename}")
 
 
-weekly = load("reserves_weekly.csv")
-monthly = load("reserves_monthly.csv")
-key_rate = load("key_rate.csv")
-fx = load("fx_rates.csv")
-war = load("war_losses.csv")
-crea_monthly = load("crea_monthly.csv")
-crea_counter = pd.read_csv(os.path.join(DATA_DIR, "crea_counter.csv"))
-crea_ports = load("crea_ports_daily.csv")
+try:
+    weekly = load("reserves_weekly.csv", ("reserves_bln_usd",))
+    monthly = load("reserves_monthly.csv", ("total_mln_usd", "fx_mln_usd", "gold_mln_usd"))
+    key_rate = load("key_rate.csv", ("key_rate_pct",))
+    fx = load("fx_rates.csv", ("currency", "rub_per_unit"))
+    war = load("war_losses.csv", ("personnel", "drones", "cruise_missiles"))
+    crea_monthly = load("crea_monthly.csv", ("destination_region", "total_eur_per_day"))
+    crea_ports = load("crea_ports_daily.csv", ("port", "area", "trade_count", "value_tonne"))
+    crea_counter = pd.read_csv(os.path.join(DATA_DIR, "crea_counter.csv"))
+    if crea_counter.empty or "destination_region" not in crea_counter:
+        raise ValueError("crea_counter.csv: dati vuoti o incompleti")
+except (OSError, ValueError, pd.errors.ParserError) as error:
+    st.error(f"Impossibile caricare i dati: {error}")
+    st.stop()
 
 # ================== ANALISI INTRODUTTIVA ==================
 with st.expander("‼️ Come leggere questi dati — metodologia e avvertenze", expanded=False):
     st.markdown("""
 **Cosa traccia questa dashboard.** Due facce dello stesso conflitto: la tenuta
 *economico-finanziaria* della Russia (riserve, tasso di interesse, rublo) e il
-costo *militare* della guerra (perdite di uomini e mezzi, missili e droni abbattuti).
+costo *militare* della guerra (perdite di uomini e mezzi, missili e UAV).
 Nessuna singola serie racconta tutto: vanno lette insieme e come **tendenze**,
 non come fotografie esatte.
 
@@ -85,15 +100,26 @@ non come fotografie esatte.
   basate su flussi commerciali e modelli di prezzo. I valori mensili rappresentano
   la **media giornaliera stimata** del mese e possono essere rivisti retroattivamente.
 
-**Le riserve\\* non sono tutte spendibili.** Il totale pubblicato dalla CBR
+**Limiti dei dati economici.** I cambi CBR sono tassi ufficiali e non misurano
+necessariamente tutta la pressione di mercato sul rublo. Il totale delle riserve
 include ~300 mld $ di asset **congelati** dalle sanzioni occidentali dal
-febbraio 2022. La parte effettivamente liquida per Mosca è essenzialmente
-oro fisico (custodito in Russia) + yuan. Per questo il grafico sulla
-struttura oro/valuta è più informativo del totale.
+febbraio 2022; il grafico aggrega valuta estera e oro, senza separare yuan
+utilizzabili, asset occidentali congelati e altre componenti. L'idea che la
+liquidità disponibile sia soprattutto oro e yuan è un'interpretazione plausibile,
+ma non è dimostrata direttamente da queste serie.
+
+**Limiti dei dati militari.** La categoria sorgente `drone` è mostrata come
+**UAV russi dichiarati persi/distrutti**: non equivale necessariamente agli
+attacchi con droni intercettati. Eventuali delta negativi sono revisioni al
+ribasso della fonte e restano visibili, non vengono trasformati in zero.
 
 **Perché il tasso chiave conta.** È il termometro dello stress: la CBR lo alza
 per difendere il rublo e frenare l'inflazione da spesa bellica. Livelli
 sopra il 15-20% segnalano un'economia in surriscaldamento da economia di guerra.
+
+**In sintesi.** Il tracker mostra bene che cosa dichiarano le fonti nel tempo;
+non misura direttamente la reale capacità economica russa, le perdite verificate
+o l'andamento strategico complessivo della guerra.
 """)
 
 st.divider()
@@ -108,12 +134,12 @@ with war_tab:
     w1, w2, w3, w4 = st.columns(4)
     for box, label, total, daily in [
         (w1, "Personale (cumulativo)", "personnel", "daily_personnel"),
-        (w2, "Droni (cumulativo)", "drones", "daily_drones"),
+        (w2, "UAV dichiarati persi/distrutti", "drones", "daily_drones"),
         (w3, "Missili da crociera", "cruise_missiles", "daily_cruise_missiles"),
         (w4, "Carri armati", "tanks", "daily_tanks"),
     ]:
         box.metric(label, f"{int(last_war[total]):,}".replace(",", " "),
-                   f"+{int(last_war[daily])} nell'ultimo giorno")
+                   f"{int(last_war[daily]):+} nell'ultimo giorno")
 
     war_ma = war.copy()
     for col in ["daily_personnel", "daily_drones", "daily_cruise_missiles"]:
@@ -131,15 +157,19 @@ with war_tab:
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "perdite-personale")
 
-    st.subheader("Droni e missili da crociera (media mobile 7gg)")
+    st.subheader("UAV e missili da crociera dichiarati persi/distrutti (media mobile 7gg)")
     missile_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
                                   min_value=war.date.min().date(), max_value=war.date.max().date(),
                                   key="missile-dates")
     missile_view = filter_dates(war_ma, missile_dates)
+    air_weapons = {"daily_drones_ma7": "UAV", "daily_cruise_missiles_ma7": "Missili da crociera"}
+    selected_air_weapons = st.multiselect("Serie da visualizzare", air_weapons,
+                                          default=list(air_weapons), format_func=air_weapons.get,
+                                          key="air-weapons")
     figw2 = go.Figure()
-    figw2.add_trace(go.Scatter(x=missile_view.date, y=missile_view.daily_drones_ma7, name="Droni"))
-    figw2.add_trace(go.Scatter(x=missile_view.date, y=missile_view.daily_cruise_missiles_ma7,
-                               name="Missili da crociera"))
+    for column in selected_air_weapons:
+        figw2.add_trace(go.Scatter(x=missile_view.date, y=missile_view[column],
+                                   name=air_weapons[column]))
     figw2.update_layout(yaxis_title="unità/giorno", legend_orientation="h")
     st.plotly_chart(figw2, width="stretch")
     data_tools(missile_view[["date", "drones", "cruise_missiles", "daily_drones",
@@ -148,8 +178,8 @@ with war_tab:
                "droni-missili")
 
     equipment = {"tanks": "Carri armati", "apc": "Blindati (APC)",
-                 "artillery": "Artiglieria", "aircraft": "Aerei", "helicopters": "Elicotteri"}
-    st.subheader("Mezzi pesanti — perdite cumulative")
+                 "artillery": "Artiglieria"}
+    st.subheader("Mezzi terrestri — perdite cumulative")
     equipment_dates = st.date_input("Intervallo", (war.date.min().date(), war.date.max().date()),
                                     min_value=war.date.min().date(), max_value=war.date.max().date(),
                                     key="equipment-dates")
@@ -164,6 +194,16 @@ with war_tab:
     data_tools(equipment_view[["date"] + selected_equipment], "dataset open-source dei report ucraini",
                "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
                "mezzi-pesanti")
+
+    st.subheader("Aviazione — perdite cumulative")
+    aviation = equipment_view[["date", "aircraft", "helicopters"]].rename(
+        columns={"aircraft": "Aerei", "helicopters": "Elicotteri"})
+    aviation_chart = aviation.melt("date", var_name="mezzo", value_name="unità")
+    st.plotly_chart(px.line(aviation_chart, x="date", y="unità", color="mezzo",
+                           labels={"date": "", "mezzo": ""}), width="stretch")
+    data_tools(aviation, "dataset open-source dei report ucraini",
+               "https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset",
+               "perdite-aviazione")
 
 with economy_tab:
     st.header("Banca Centrale Russa")
@@ -192,6 +232,7 @@ with economy_tab:
                "riserve-settimanali")
 
     st.subheader("Struttura delle riserve: valuta estera vs oro")
+    st.caption("La voce valuta estera non separa yuan utilizzabili, asset occidentali congelati e altre componenti.")
     structure_dates = st.date_input("Intervallo", (monthly.date.min().date(), monthly.date.max().date()),
                                     min_value=monthly.date.min().date(), max_value=monthly.date.max().date(),
                                     key="structure-dates")
@@ -217,6 +258,7 @@ with economy_tab:
     data_tools(key_view, "Banca Centrale Russa", "https://www.cbr.ru/development/DWS/", "tasso-chiave")
 
     st.subheader("Cambi ufficiali (₽ per unità)")
+    st.caption("Tassi ufficiali CBR: non rappresentano necessariamente tutta la pressione di mercato sul rublo.")
     fx_dates = st.date_input("Intervallo", (fx.date.min().date(), fx.date.max().date()),
                              min_value=fx.date.min().date(), max_value=fx.date.max().date(),
                              key="fx-dates")

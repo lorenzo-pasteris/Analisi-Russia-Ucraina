@@ -1,67 +1,52 @@
 # Russia Tracker
 
-Tracker automatico su due binari con frequenze diverse:
+Dashboard pubblica: https://tracker-conflitto-ucraina.streamlit.app/
 
-**Economia (aggiornamento SETTIMANALE, giovedì)** — Banca Centrale Russa via API SOAP:
-- Riserve internazionali settimanali (mld USD) e mensili con struttura oro/valuta
-- Tasso chiave e cambi ufficiali USD/EUR/CNY
+Tracker automatico di indicatori economici, energetici e militari relativi
+alla guerra Russia-Ucraina.
 
-**Guerra (aggiornamento GIORNALIERO)** — Stato Maggiore ucraino via dataset open:
-- Perdite russe: personale, carri, blindati, artiglieria, aerei, elicotteri
-- Missili da crociera e droni abbattuti (cumulativi + delta giornalieri)
+## Fonti e aggiornamenti
 
-Due workflow GitHub Actions separati (`update.yml` settimanale, `update_war.yml`
-giornaliero) scaricano i dati, li salvano come CSV in `data/` e li committano.
-La dashboard Streamlit include un'analisi introduttiva con le avvertenze
-metodologiche e marca con \* i dati delle riserve (che includono gli asset congelati).
+- **Banca Centrale Russa (settimanale, giovedì):** riserve internazionali,
+  struttura aggregata valuta/oro, tasso chiave e cambi ufficiali USD/EUR/CNY.
+- **Stato Maggiore ucraino (giornaliero):** perdite russe dichiarate di
+  personale, mezzi, missili da crociera e UAV.
+- **CREA Russia Fossil Tracker (giornaliero):** ricavi stimati dalle esportazioni
+  fossili e flussi marittimi di greggio.
 
-## Cosa devi fare tu (10 minuti)
+I workflow in `.github/workflows/` aggiornano i CSV in `data/`. Streamlit
+ridistribuisce automaticamente la dashboard dopo ogni commit.
 
-### 1. Crea il repository su GitHub
-1. Vai su github.com → **New repository** → nome es. `cbr-tracker`, pubblico
-2. Carica tutti i file di questa cartella (anche la cartella nascosta
-   `.github/workflows/` — se usi l'upload web, trascina l'intera cartella;
-   in alternativa da terminale:
-   ```bash
-   cd cbr-tracker
-   git init && git add -A && git commit -m "init"
-   git remote add origin https://github.com/TUO_USERNAME/cbr-tracker.git
-   git push -u origin main
-   ```
+## Limiti metodologici
 
-### 2. Attiva le Actions
-1. Nel repo → tab **Actions** → se richiesto, clicca "I understand… enable"
-2. Settings → Actions → General → **Workflow permissions** →
-   seleziona **Read and write permissions** → Save
-3. Tab Actions → workflow "Aggiornamento dati CBR" → **Run workflow**
-   per testarlo subito. Da lì in poi gira da solo ogni giorno alle 15:10 UTC.
+- Le perdite militari sono dichiarate da una parte in guerra e non sono conteggi
+  verificati indipendentemente. La categoria sorgente `drone` indica UAV russi
+  dichiarati persi/distrutti, non necessariamente attacchi intercettati.
+- Le revisioni negative dei valori cumulativi restano visibili nei delta giornalieri.
+- I cambi CBR sono ufficiali e non necessariamente descrivono tutta la pressione
+  di mercato sul rublo.
+- Le riserve includono asset congelati; la serie valuta/oro non separa yuan
+  utilizzabili, asset occidentali congelati e altre componenti.
+- I dati CREA sono stime basate su flussi commerciali e modelli di prezzo e
+  possono essere rivisti.
 
-### 3. Pubblica la dashboard (gratis)
-1. Vai su [share.streamlit.io](https://share.streamlit.io) → login con GitHub
-2. **New app** → scegli il repo `cbr-tracker`, branch `main`,
-   file `dashboard.py` → Deploy
-3. Fine: hai un URL pubblico che si aggiorna da solo quando la Action
-   committa nuovi dati.
+La dashboard descrive ciò che le fonti dichiarano nel tempo e serve a osservare
+tendenze: non misura direttamente capacità economica reale, perdite verificate
+o andamento strategico complessivo della guerra.
 
 ## Uso locale
 
 ```bash
 pip install -r requirements.txt
-python fetch_cbr.py        # dati economia (CBR)
-python fetch_war.py        # dati guerra
-streamlit run dashboard.py # apre la dashboard su localhost
+python fetch_cbr.py
+python fetch_war.py
+python fetch_crea.py
+streamlit run dashboard.py
 ```
 
-## Note
+## Test
 
-- Lo script è **idempotente**: riscarica una finestra di 60 giorni e deduplica,
-  quindi recupera da solo eventuali giorni saltati.
-- Se una serie fallisce, le altre vengono comunque salvate; il job fallisce
-  solo se l'intero sito è irraggiungibile.
-- Le riserve CBR **includono gli asset congelati** dalle sanzioni (~300 mld $):
-  il totale pubblicato non è tutto liquido/disponibile.
-- Le perdite russe sono **cifre dichiarate da Kyiv**: limite superiore, utili
-  soprattutto come trend (Oryx, che conta solo perdite fotografate, dà numeri
-  più bassi per i mezzi).
-- Prossimi step possibili: scraper Roskazna, attacchi missilistici per regione,
-  confronto con stime Oryx.
+```bash
+python -m unittest discover
+python -m py_compile dashboard.py fetch_cbr.py fetch_war.py fetch_crea.py
+```
